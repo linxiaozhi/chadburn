@@ -35,6 +35,7 @@ func (c *FileConfigHandler) watch() {
 		select {
 		case <-tick:
 			newCfgHash := getCfgHash(c.ConfigFile)
+			c.logger.Debugf("config file hash,old hash:%s,new hash:%s", cfgHash, newCfgHash)
 			if cfgHash != newCfgHash {
 				c.logger.Debugf("config file has changed,old hash:%s,new hash:%s", cfgHash, newCfgHash)
 				config, err := BuildFromFile(c.ConfigFile, c.logger)
