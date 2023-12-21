@@ -3,11 +3,10 @@ package core
 import (
 	"errors"
 	"fmt"
-	"sync"
-
-	"github.com/robfig/cron/v3"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/robfig/cron/v3"
+	"sync"
 )
 
 var (
@@ -68,7 +67,9 @@ func NewScheduler(l Logger) *Scheduler {
 	cronUtils := NewCronUtils(l)
 	return &Scheduler{
 		Logger: l,
-		cron:   cron.New(cron.WithLogger(cronUtils), cron.WithChain(cron.Recover(cronUtils))),
+		cron: cron.New(cron.WithParser(cron.NewParser(
+			cron.SecondOptional|cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Descriptor,
+		)), cron.WithLogger(cronUtils), cron.WithChain(cron.Recover(cronUtils))),
 	}
 }
 
