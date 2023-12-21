@@ -201,9 +201,9 @@ func (c *middlewareContainer) Use(ms ...Middleware) {
 		}
 
 		t := reflect.TypeOf(m).String()
-		if _, ok := c.m[t]; ok {
-			continue
-		}
+		//if _, ok := c.m[t]; ok {
+		//	continue
+		//}
 
 		c.order = append(c.order, t)
 		c.m[t] = m

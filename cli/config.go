@@ -62,12 +62,12 @@ func BuildFromString(config string, logger core.Logger) (*Config, error) {
 }
 
 // Call this only once at app init
-func (c *Config) InitializeApp(dd bool) error {
+func (c *Config) InitializeApp(configFile string, dd bool) error {
 	c.sh = core.NewScheduler(c.logger)
 	c.buildSchedulerMiddlewares(c.sh)
 
 	var err error
-	c.configHandler, err = NewFileConfigHandler(c, c.logger)
+	c.configHandler, err = NewFileConfigHandler(configFile, c, c.logger)
 	if err != nil {
 		return err
 	}
@@ -121,10 +121,12 @@ func (c *Config) buildSchedulerMiddlewares(sh *core.Scheduler) {
 }
 
 func (c *Config) updateExecJobs(newConfig *Config) {
+	c.Global = newConfig.Global
+	c.buildSchedulerMiddlewares(c.sh)
 	// Calculate the delta
 	for name, j := range c.ExecJobs {
 		// this prevents deletion of jobs that were added by reading a configuration file
-		if !j.FromDockerLabel {
+		if j.FromDockerLabel {
 			continue
 		}
 
