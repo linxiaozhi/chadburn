@@ -20,6 +20,8 @@ type fileConfigUpdate interface {
 }
 
 func NewFileConfigHandler(notifier fileConfigUpdate, logger core.Logger) (*FileConfigHandler, error) {
+	logger.Debugf("FileConfigHandler NewFileConfigHandler")
+
 	c := &FileConfigHandler{}
 	c.notifier = notifier
 	c.logger = logger
@@ -28,13 +30,14 @@ func NewFileConfigHandler(notifier fileConfigUpdate, logger core.Logger) (*FileC
 }
 
 func (c *FileConfigHandler) watch() {
-	cfgHash := getCfgHash(c.ConfigFile)
+	cfgHash := c.getCfgHash(c.ConfigFile)
+	c.logger.Debugf("FileConfigHandler watch")
 
 	tick := time.Tick(10000 * time.Millisecond)
 	for {
 		select {
 		case <-tick:
-			newCfgHash := getCfgHash(c.ConfigFile)
+			newCfgHash := c.getCfgHash(c.ConfigFile)
 			c.logger.Debugf("config file hash,old hash:%s,new hash:%s", cfgHash, newCfgHash)
 			if cfgHash != newCfgHash {
 				c.logger.Debugf("config file has changed,old hash:%s,new hash:%s", cfgHash, newCfgHash)
@@ -49,16 +52,16 @@ func (c *FileConfigHandler) watch() {
 	}
 }
 
-func getCfgHash(filename string) string {
+func (c *FileConfigHandler) getCfgHash(filename string) string {
 	file, err := os.Open(filename)
 	defer file.Close()
 	if err != nil {
-		panic(err)
+		c.logger.Errorf(err.Error())
 	}
 
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
-		panic(err)
+		c.logger.Errorf(err.Error())
 	}
 	sum := fmt.Sprintf("%x", hash.Sum(nil))
 
