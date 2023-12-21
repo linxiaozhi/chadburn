@@ -28,6 +28,7 @@ type Config struct {
 	ServiceJobs   map[string]*RunServiceConfig `gcfg:"job-service-run" mapstructure:"job-service-run,squash"`
 	LocalJobs     map[string]*LocalJobConfig   `gcfg:"job-local" mapstructure:"job-local,squash"`
 	sh            *core.Scheduler
+	configHandler *FileConfigHandler
 	dockerHandler *DockerHandler
 	logger        core.Logger
 }
@@ -65,8 +66,13 @@ func (c *Config) InitializeApp(dd bool) error {
 	c.sh = core.NewScheduler(c.logger)
 	c.buildSchedulerMiddlewares(c.sh)
 
+	var err error
+	c.configHandler, err = NewFileConfigHandler(c, c.logger)
+	if err != nil {
+		return err
+	}
+
 	if !dd {
-		var err error
 		c.dockerHandler, err = NewDockerHandler(c, c.logger)
 		if err != nil {
 			return err
@@ -112,6 +118,64 @@ func (c *Config) buildSchedulerMiddlewares(sh *core.Scheduler) {
 	sh.Use(middlewares.NewSave(&c.Global.SaveConfig))
 	sh.Use(middlewares.NewMail(&c.Global.MailConfig))
 	sh.Use(middlewares.NewGotify(&c.Global.GotifyConfig))
+}
+
+func (c *Config) updateExecJobs(newConfig *Config) {
+	// Calculate the delta
+	for name, j := range c.ExecJobs {
+		// this prevents deletion of jobs that were added by reading a configuration file
+		if !j.FromDockerLabel {
+			continue
+		}
+
+		found := false
+		for newJobsName, newJob := range newConfig.ExecJobs {
+			// Check if the schedule has changed
+			if name == newJobsName {
+				found = true
+				// There is a slight race condition were a job can be canceled / restarted with different params
+				// so, lets take care of it by simply restarting
+				// For the hash to work properly, we must fill the fields before calling it
+				defaults.SetDefaults(newJob)
+				newJob.Client = c.dockerHandler.GetInternalDockerClient()
+				newJob.Name = newJobsName
+				if newJob.Hash() != j.Hash() {
+					// Remove from the scheduler
+					c.sh.RemoveJob(j)
+					// Add the job back to the scheduler
+					newJob.buildMiddlewares()
+					c.sh.AddJob(newJob)
+					// Update the job config
+					c.ExecJobs[name] = newJob
+				}
+				break
+			}
+		}
+		if !found {
+			// Remove the job
+			c.sh.RemoveJob(j)
+			delete(c.ExecJobs, name)
+		}
+	}
+
+	// Check for aditions
+	for newJobsName, newJob := range newConfig.ExecJobs {
+		found := false
+		for name := range c.ExecJobs {
+			if name == newJobsName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			defaults.SetDefaults(newJob)
+			newJob.Client = c.dockerHandler.GetInternalDockerClient()
+			newJob.Name = newJobsName
+			newJob.buildMiddlewares()
+			c.sh.AddJob(newJob)
+			c.ExecJobs[newJobsName] = newJob
+		}
+	}
 }
 
 func (c *Config) dockerLabelsUpdate(labels map[string]map[string]string) {
@@ -177,6 +241,10 @@ func (c *Config) dockerLabelsUpdate(labels map[string]map[string]string) {
 
 }
 
+func (c *Config) fileConfigUpdate(newConfig *Config) {
+	c.updateExecJobs(newConfig)
+}
+
 // ExecJobConfig contains all configuration params needed to build a ExecJob
 type ExecJobConfig struct {
 	core.ExecJob              `mapstructure:",squash"`
@@ -185,7 +253,7 @@ type ExecJobConfig struct {
 	middlewares.SaveConfig    `mapstructure:",squash"`
 	middlewares.MailConfig    `mapstructure:",squash"`
 	middlewares.GotifyConfig  `mapstructure:",squash"`
-	FromDockerLabel bool `mapstructure:"fromDockerLabel"`
+	FromDockerLabel           bool `mapstructure:"fromDockerLabel"`
 }
 
 func (c *ExecJobConfig) buildMiddlewares() {
