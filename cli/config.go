@@ -3,8 +3,8 @@ package cli
 import (
 	"github.com/PremoWeb/Chadburn/core"
 	"github.com/PremoWeb/Chadburn/middlewares"
-
 	defaults "github.com/mcuadros/go-defaults"
+	"github.com/mitchellh/hashstructure/v2"
 	gcfg "gopkg.in/gcfg.v1"
 )
 
@@ -62,17 +62,17 @@ func BuildFromString(config string, logger core.Logger) (*Config, error) {
 }
 
 // Call this only once at app init
-func (c *Config) InitializeApp(configFile string, dd bool) error {
+func (c *Config) InitializeApp(daemon *DaemonCommand) error {
 	c.sh = core.NewScheduler(c.logger)
 	c.buildSchedulerMiddlewares(c.sh)
 
 	var err error
-	c.configHandler, err = NewFileConfigHandler(configFile, c, c.logger)
+	c.configHandler, err = NewFileConfigHandler(daemon.ConfigFile, c, c.logger)
 	if err != nil {
 		return err
 	}
 
-	if !dd {
+	if !daemon.DisableDocker {
 		c.dockerHandler, err = NewDockerHandler(c, c.logger)
 		if err != nil {
 			return err
@@ -120,13 +120,35 @@ func (c *Config) buildSchedulerMiddlewares(sh *core.Scheduler) {
 	sh.Use(middlewares.NewGotify(&c.Global.GotifyConfig))
 }
 
-func (c *Config) updateExecJobs(newConfig *Config) {
-	c.Global = newConfig.Global
-	c.buildSchedulerMiddlewares(c.sh)
+func (c *Config) updateExecJobs(newConfig *Config, isDockerLabels bool) {
+	isConfigClobalUpdate := false
+	if !isDockerLabels {
+		oldHash, err := hashstructure.Hash(c.Global, hashstructure.FormatV2, nil)
+		if err != nil {
+			c.logger.Errorf("config global old hash err:%s", err.Error())
+		}
+
+		newhash, newerr := hashstructure.Hash(newConfig.Global, hashstructure.FormatV2, nil)
+		if newerr != nil {
+			c.logger.Errorf("config global new hash err:%s", newerr.Error())
+		}
+
+		if oldHash != newhash {
+			isConfigClobalUpdate = true
+		}
+
+		c.logger.Debugf("config global hash old:%d  new:%d", oldHash, newhash)
+
+		if isConfigClobalUpdate {
+			c.Global = newConfig.Global
+			c.buildSchedulerMiddlewares(c.sh)
+		}
+	}
+
 	// Calculate the delta
 	for name, j := range c.ExecJobs {
 		// this prevents deletion of jobs that were added by reading a configuration file
-		if j.FromDockerLabel {
+		if (isDockerLabels && !j.FromDockerLabel) || (!isDockerLabels && j.FromDockerLabel) {
 			continue
 		}
 
@@ -141,7 +163,7 @@ func (c *Config) updateExecJobs(newConfig *Config) {
 				defaults.SetDefaults(newJob)
 				newJob.Client = c.dockerHandler.GetInternalDockerClient()
 				newJob.Name = newJobsName
-				if newJob.Hash() != j.Hash() {
+				if newJob.Hash() != j.Hash() || isConfigClobalUpdate {
 					// Remove from the scheduler
 					c.sh.RemoveJob(j)
 					// Add the job back to the scheduler
@@ -185,66 +207,18 @@ func (c *Config) dockerLabelsUpdate(labels map[string]map[string]string) {
 	var parsedLabelConfig Config
 	parsedLabelConfig.buildFromDockerLabels(labels)
 
-	// Calculate the delta
-	for name, j := range c.ExecJobs {
-		// this prevents deletion of jobs that were added by reading a configuration file
-		if !j.FromDockerLabel {
-			continue
-		}
+	newConfig := NewConfig(c.logger)
+	newConfig.Global = parsedLabelConfig.Global
+	newConfig.ExecJobs = parsedLabelConfig.ExecJobs
+	newConfig.RunJobs = parsedLabelConfig.RunJobs
+	newConfig.LocalJobs = parsedLabelConfig.LocalJobs
+	newConfig.ServiceJobs = parsedLabelConfig.ServiceJobs
 
-		found := false
-		for newJobsName, newJob := range parsedLabelConfig.ExecJobs {
-			// Check if the schedule has changed
-			if name == newJobsName {
-				found = true
-				// There is a slight race condition were a job can be canceled / restarted with different params
-				// so, lets take care of it by simply restarting
-				// For the hash to work properly, we must fill the fields before calling it
-				defaults.SetDefaults(newJob)
-				newJob.Client = c.dockerHandler.GetInternalDockerClient()
-				newJob.Name = newJobsName
-				if newJob.Hash() != j.Hash() {
-					// Remove from the scheduler
-					c.sh.RemoveJob(j)
-					// Add the job back to the scheduler
-					newJob.buildMiddlewares()
-					c.sh.AddJob(newJob)
-					// Update the job config
-					c.ExecJobs[name] = newJob
-				}
-				break
-			}
-		}
-		if !found {
-			// Remove the job
-			c.sh.RemoveJob(j)
-			delete(c.ExecJobs, name)
-		}
-	}
-
-	// Check for aditions
-	for newJobsName, newJob := range parsedLabelConfig.ExecJobs {
-		found := false
-		for name := range c.ExecJobs {
-			if name == newJobsName {
-				found = true
-				break
-			}
-		}
-		if !found {
-			defaults.SetDefaults(newJob)
-			newJob.Client = c.dockerHandler.GetInternalDockerClient()
-			newJob.Name = newJobsName
-			newJob.buildMiddlewares()
-			c.sh.AddJob(newJob)
-			c.ExecJobs[newJobsName] = newJob
-		}
-	}
-
+	c.updateExecJobs(newConfig, true)
 }
 
 func (c *Config) fileConfigUpdate(newConfig *Config) {
-	c.updateExecJobs(newConfig)
+	c.updateExecJobs(newConfig, false)
 }
 
 // ExecJobConfig contains all configuration params needed to build a ExecJob

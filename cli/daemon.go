@@ -48,7 +48,7 @@ func (c *DaemonCommand) boot() (err error) {
 		c.Logger.Debugf("Cannot read config file: %q", err)
 	}
 
-	err = config.InitializeApp(c.ConfigFile, c.DisableDocker)
+	err = config.InitializeApp(c)
 	if err != nil {
 		c.Logger.Criticalf("Can't start the app: %v", err)
 	}

@@ -201,6 +201,7 @@ func (c *middlewareContainer) Use(ms ...Middleware) {
 		}
 
 		t := reflect.TypeOf(m).String()
+		// 注释允许替换中间件
 		//if _, ok := c.m[t]; ok {
 		//	continue
 		//}

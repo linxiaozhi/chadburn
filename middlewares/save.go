@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/PremoWeb/Chadburn/core"
 	"io"
 	"os"
 	"path/filepath"
-
-	"github.com/PremoWeb/Chadburn/core"
+	"time"
 )
 
 // SaveConfig configuration for the Save middleware
@@ -56,16 +56,21 @@ func (m *Save) Run(ctx *core.Context) error {
 func (m *Save) saveToDisk(ctx *core.Context) error {
 	root := filepath.Join(m.SaveFolder, fmt.Sprintf(
 		"%s_%s",
-		ctx.Execution.Date.Format("20060102_150405"), ctx.Job.GetName(),
+		ctx.Job.GetName(), ctx.Execution.Date.Format("20060102"),
 	))
 
 	e := ctx.Execution
-	err := m.saveReaderToDisk(bytes.NewReader(e.ErrorStream.Bytes()), fmt.Sprintf("%s.stderr.log", root))
+	err := m.saveReaderToDisk(bytes.NewReader(e.ErrorStream.Bytes()), fmt.Sprintf("%s.log", root))
 	if err != nil {
 		return err
 	}
 
-	err = m.saveReaderToDisk(bytes.NewReader(e.OutputStream.Bytes()), fmt.Sprintf("%s.stdout.log", root))
+	err = m.saveReaderToDisk(bytes.NewReader([]byte(fmt.Sprintf("%s [%s]  [%s]\n", time.Now().Format("2006-01-02 15:04:05.000"), ctx.Job.GetName(), ctx.Job.GetCommand()))), fmt.Sprintf("%s.log", root))
+	if err != nil {
+		return err
+	}
+
+	err = m.saveReaderToDisk(bytes.NewReader(e.OutputStream.Bytes()), fmt.Sprintf("%s.log", root))
 	if err != nil {
 		return err
 	}
@@ -74,7 +79,6 @@ func (m *Save) saveToDisk(ctx *core.Context) error {
 	if err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -88,12 +92,12 @@ func (m *Save) saveContextToDisk(ctx *core.Context, filename string) error {
 }
 
 func (m *Save) saveReaderToDisk(r io.Reader, filename string) error {
-	f, err := os.Create(filename)
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
-
 	defer f.Close()
+
 	if _, err := io.Copy(f, r); err != nil {
 		return err
 	}

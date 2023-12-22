@@ -1,12 +1,8 @@
 package cli
 
 import (
-	"crypto/sha256"
-	"fmt"
 	"github.com/PremoWeb/Chadburn/core"
-	"io"
-	"os"
-	"time"
+	"github.com/fsnotify/fsnotify"
 )
 
 type FileConfigHandler struct {
@@ -29,37 +25,43 @@ func NewFileConfigHandler(configFile string, notifier fileConfigUpdate, logger c
 }
 
 func (c *FileConfigHandler) watch() {
-	cfgHash := c.getCfgHash(c.ConfigFile)
-	tick := time.Tick(10000 * time.Millisecond)
-	for {
-		select {
-		case <-tick:
-			newCfgHash := c.getCfgHash(c.ConfigFile)
-			if cfgHash != newCfgHash {
-				c.logger.Debugf("config file has changed,old hash:%s,new hash:%s", cfgHash, newCfgHash)
-				config, err := BuildFromFile(c.ConfigFile, c.logger)
-				if err != nil {
-					c.logger.Debugf("Cannot read config file: %q", err)
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		c.logger.Errorf("create watcher err:%s", err.Error())
+	}
+	defer watcher.Close()
+
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
 				}
-				c.notifier.fileConfigUpdate(config)
-				cfgHash = newCfgHash
+
+				if (event.Has(fsnotify.Write) || event.Has(fsnotify.Create)) && event.Name == c.ConfigFile {
+
+					c.logger.Debugf("config file has changed %s", event.Name)
+
+					config, err := BuildFromFile(c.ConfigFile, c.logger)
+					if err != nil {
+						c.logger.Debugf("Cannot read config file: %q", err)
+					}
+					c.notifier.fileConfigUpdate(config)
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				c.logger.Errorf("watcher err:%s", err.Error())
 			}
 		}
-	}
-}
+	}()
 
-func (c *FileConfigHandler) getCfgHash(filename string) string {
-	file, err := os.Open(filename)
-	defer file.Close()
+	err = watcher.Add(c.ConfigFile)
 	if err != nil {
-		c.logger.Errorf("filename:%s,err:%s", filename, err.Error())
+		c.logger.Errorf("watcher err:%s", err.Error())
 	}
 
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		c.logger.Errorf("filename:%s,err:%s", filename, err.Error())
-	}
-	sum := fmt.Sprintf("%x", hash.Sum(nil))
-
-	return sum
+	select {}
 }
