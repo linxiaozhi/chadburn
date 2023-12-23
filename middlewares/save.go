@@ -1,7 +1,7 @@
 package middlewares
 
 import (
-	"bytes"
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"github.com/PremoWeb/Chadburn/core"
@@ -13,8 +13,9 @@ import (
 
 // SaveConfig configuration for the Save middleware
 type SaveConfig struct {
-	SaveFolder      string `gcfg:"save-folder" mapstructure:"save-folder"`
-	SaveOnlyOnError bool   `gcfg:"save-only-on-error" mapstructure:"save-only-on-error"`
+	SaveFolder         string `gcfg:"save-folder" mapstructure:"save-folder"`
+	SaveOnlyOnError    bool   `gcfg:"save-only-on-error" mapstructure:"save-only-on-error"`
+	SaveJobExecContext bool   `gcfg:"save-job-exec-context" mapstructure:"save-job-exec-context"`
 }
 
 // NewSave returns a Save middleware if the given configuration is not empty
@@ -50,7 +51,28 @@ func (m *Save) Run(ctx *core.Context) error {
 		}
 	}
 
+	if m.SaveJobExecContext {
+		err := m.saveJobExecContextToDisk(ctx)
+		if err != nil {
+			ctx.Logger.Errorf("Save error: %q", err)
+		}
+	}
+
 	return err
+}
+
+func (m *Save) saveJobExecContextToDisk(ctx *core.Context) error {
+	root := filepath.Join(m.SaveFolder, fmt.Sprintf(
+		"%s_%s",
+		ctx.Job.GetName(), ctx.Execution.Date.Format("20060102"),
+	))
+
+	err := m.saveContextToDisk(ctx, fmt.Sprintf("%s.json", root))
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (m *Save) saveToDisk(ctx *core.Context) error {
@@ -59,26 +81,20 @@ func (m *Save) saveToDisk(ctx *core.Context) error {
 		ctx.Job.GetName(), ctx.Execution.Date.Format("20060102"),
 	))
 
-	e := ctx.Execution
-	err := m.saveReaderToDisk(bytes.NewReader(e.ErrorStream.Bytes()), fmt.Sprintf("%s.log", root))
+	errText := "none"
+	if ctx.Execution.Error != nil {
+		errText = ctx.Execution.Error.Error()
+	}
+
+	msgText := fmt.Sprintf("%s [Job \"%s\" (%s)] Started - %s\n", time.Now().Format("2006-01-02 15:04:05.000"), ctx.Job.GetName(), ctx.Execution.ID, ctx.Job.GetCommand())
+	msgText += fmt.Sprintf("Output: %s", string(ctx.Execution.OutputStream.Bytes()))
+	msgText += fmt.Sprintf("Finished in %q, failed: %t, skipped: %t, error: %s\n\n", ctx.Execution.Duration, ctx.Execution.Failed, ctx.Execution.Skipped, errText)
+
+	err := m.saveStringToDisk(msgText, fmt.Sprintf("%s.log", root))
 	if err != nil {
 		return err
 	}
 
-	err = m.saveReaderToDisk(bytes.NewReader([]byte(fmt.Sprintf("%s [%s]  [%s]\n", time.Now().Format("2006-01-02 15:04:05.000"), ctx.Job.GetName(), ctx.Job.GetCommand()))), fmt.Sprintf("%s.log", root))
-	if err != nil {
-		return err
-	}
-
-	err = m.saveReaderToDisk(bytes.NewReader(e.OutputStream.Bytes()), fmt.Sprintf("%s.log", root))
-	if err != nil {
-		return err
-	}
-
-	err = m.saveContextToDisk(ctx, fmt.Sprintf("%s.json", root))
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -88,7 +104,7 @@ func (m *Save) saveContextToDisk(ctx *core.Context, filename string) error {
 		"Execution": ctx.Execution,
 	}, "", "  ")
 
-	return m.saveReaderToDisk(bytes.NewBuffer(js), filename)
+	return m.saveStringToDisk(fmt.Sprintf("%s\n\n", string(js)), filename)
 }
 
 func (m *Save) saveReaderToDisk(r io.Reader, filename string) error {
@@ -101,6 +117,34 @@ func (m *Save) saveReaderToDisk(r io.Reader, filename string) error {
 	if _, err := io.Copy(f, r); err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func (m *Save) saveBytesToDisk(p []byte, filename string) error {
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	writer := bufio.NewWriter(f)
+	writer.Write(p)
+	writer.Flush()
+
+	return nil
+}
+
+func (m *Save) saveStringToDisk(s string, filename string) error {
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	writer := bufio.NewWriter(f)
+	writer.WriteString(s)
+	writer.Flush()
 
 	return nil
 }
