@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -215,4 +216,10 @@ func (j *RunServiceJob) deleteService(ctx *Context, svcID string) error {
 
 	return err
 
+}
+
+func (j *RunServiceJob) Hash() string {
+	var hash string
+	getHash(reflect.TypeOf(j).Elem(), reflect.ValueOf(j).Elem(), &hash)
+	return hash
 }

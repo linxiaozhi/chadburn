@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	labelPrefix = "chadburn"
+	labelPrefix = "scheduler"
 
 	requiredLabel       = labelPrefix + ".enabled"
 	requiredLabelFilter = requiredLabel + "=true"
@@ -59,16 +59,19 @@ func (c *Config) buildFromDockerLabels(labels map[string]map[string]string) erro
 			case jobType == jobLocal && isServiceContainer:
 				if _, ok := localJobs[jobName]; !ok {
 					localJobs[jobName] = make(map[string]interface{})
+					localJobs[jobName]["fromDockerLabel"] = true
 				}
 				setJobParam(localJobs[jobName], jopParam, v)
 			case jobType == jobServiceRun && isServiceContainer:
 				if _, ok := serviceJobs[jobName]; !ok {
 					serviceJobs[jobName] = make(map[string]interface{})
+					serviceJobs[jobName]["fromDockerLabel"] = true
 				}
 				setJobParam(serviceJobs[jobName], jopParam, v)
 			case jobType == jobRun && isServiceContainer:
 				if _, ok := runJobs[jobName]; !ok {
 					runJobs[jobName] = make(map[string]interface{})
+					runJobs[jobName]["fromDockerLabel"] = true
 				}
 				setJobParam(runJobs[jobName], jopParam, v)
 			default:

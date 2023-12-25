@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -242,4 +243,10 @@ func (j *RunJob) deleteContainer(containerID string) error {
 	return j.Client.RemoveContainer(docker.RemoveContainerOptions{
 		ID: containerID,
 	})
+}
+
+func (j *RunJob) Hash() string {
+	var hash string
+	getHash(reflect.TypeOf(j).Elem(), reflect.ValueOf(j).Elem(), &hash)
+	return hash
 }

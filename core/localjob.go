@@ -2,6 +2,7 @@ package core
 
 import (
 	"os/exec"
+	"reflect"
 
 	"github.com/gobs/args"
 )
@@ -40,4 +41,10 @@ func (j *LocalJob) buildCommand(ctx *Context) (*exec.Cmd, error) {
 		Env:    j.Environment,
 		Dir:    j.Dir,
 	}, nil
+}
+
+func (j *LocalJob) Hash() string {
+	var hash string
+	getHash(reflect.TypeOf(j).Elem(), reflect.ValueOf(j).Elem(), &hash)
+	return hash
 }
